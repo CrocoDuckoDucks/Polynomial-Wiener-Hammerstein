@@ -1,8 +1,17 @@
 using FFTW
 using DSP
+using Plots
+
+function lin2dB(value::Number, reference::Number = 1.0)
+    return 20.0 * log10(abs(value / reference))
+end
+
+function dB2lin(value::Number, reference::Number = 1.0)
+    return abs(reference) * exp10(value / 20.0)
+end
 
 function wrapTo2Pi!(x::AbstractArray)
-    x .-= 2pi .* floor.(x ./ 2pi)
+    x .-= 2pi .* fld.(x, 2pi)
 end
 
 function wrapTo2Pi(x::AbstractArray)
@@ -123,12 +132,25 @@ function branchAntialFirTaps(
 
 end
 
+function randomUniform(a::Real, b::Real)
+    return (b - a) * rand() + a
+end
+
 function randomFrequency(Fs::Real, fMin::Real = 20.0)
 
     a = log10(fMin)
     b = log10(0.5 * Fs)
 
-    return exp10((b - a) * rand() + a)
+    return exp10(randomUniform(a, b))
+
+end
+
+function randomdBGain(minGain_dB::Real, maxGain_dB::Real)
+    return randomUniform(minGain_dB, maxGain_dB)
+end
+
+function randomLinGain(minGain_dB::Real, maxGain_dB::Real)
+    return dB2lin(randomdBGain(minGain_dB, maxGain_dB))
 end
 
 function randomLowpass(Fs::Real, fMin::Real)
@@ -168,12 +190,16 @@ function randomResponseType(Fs::Real, fMin::Real)
 
 end
 
+function randomInteger(maxInt::Integer)
+    return rand(1:maxInt)
+end
+
 function randomOrder(maxOrder::Integer)
-    return rand(1:maxOrder)
+    return randomInteger(maxOrder)
 end
 
 function randomRipple(rippleLim1::Real, rippleLim2::Real)
-    return (rippleLim2 - rippleLim1) * rand() + rippleLim1
+    return randomUniform(rippleLim1, rippleLim2)
 end
 
 function randomButterworth(maxOrder::Integer)
@@ -253,6 +279,7 @@ end
 struct pwh
     antiAls
     kernels
+    gains
 end
 
 function randomPWH(
@@ -263,20 +290,24 @@ function randomPWH(
     fMin::Real,
     maxOrder::Integer,
     rippleLim1::Real,
-    rippleLim2::Real
+    rippleLim2::Real,
+    minGain_dB::Real,
+    maxGain_dB::Real
     )
 
     antiAls = []
     kernels = []
+    gains   = []
 
     for n in 1:N
 
         append!(antiAls, [branchAntialFirTaps(n, nTaps, ripple, Fs)])
         append!(kernels, [randomIIR(Fs, fMin, maxOrder, rippleLim1, rippleLim2)])
+        append!(gains, randomLinGain(minGain_dB, maxGain_dB))
 
     end
 
-    return pwh(antiAls, kernels)
+    return pwh(antiAls, kernels, gains)
 
 end
 
@@ -321,7 +352,7 @@ function pwh2faust(pwhObj::pwh, dspPath::String, biqFcn::String)
                     write(fID, "$(pwhObj.antiAls[n][t])")
 
                     if t == length(pwhObj.antiAls[n])
-                        write(fID, ")) : pow(_, $(n)) : ")
+                        write(fID, ")) : pow(_, $(n)) : *(_, $(pwhObj.gains[n])) : ")
                     else
                         write(fID, ", ")
                     end
@@ -351,5 +382,90 @@ function pwh2faust(pwhObj::pwh, dspPath::String, biqFcn::String)
         end
 
     end
+
+end
+
+function pwh2plot(pwhObj::pwh, wLength::Integer, Fs::Real)
+
+    plt = plot(layout = 4, xlabel = "Frequency [Hz]")
+
+    plot!(
+        plt,
+        ylabel = "Magnitude [dB]",
+        title = "Branch Antialiasing",
+        subplot = 1
+        )
+
+    plot!(
+        plt,
+        ylabel = "Angle [rad]",
+        title = "Branch Antialiasing",
+        subplot = 3
+        )
+
+    plot!(
+        plt,
+        ylabel = "Magnitude [dB]",
+        title = "Branch Kernel",
+        subplot = 2
+        )
+
+    plot!(
+        plt,
+        ylabel = "Angle [rad]",
+        title = "Branch Kernel",
+        subplot = 4
+        )
+
+    fKernels = (0:(wLength - 1)) * Fs / 2wLength
+
+    for n in 1:length(pwhObj.antiAls)
+
+        H = rfft(pwhObj.antiAls[n])
+
+        fAntial = (0:(length(H) - 1)) *
+            Fs / 2length(H)
+
+        plot!(
+            plt,
+            fAntial[2:end],
+            lin2dB.(H[2:end]),
+            xscale = :log10,
+            label = "$n",
+            subplot = 1
+            )
+
+        plot!(
+            plt,
+            fAntial[2:end],
+            unwrap(angle.(H[2:end])),
+            xscale = :log10,
+            label = "$n",
+            subplot = 3
+            )
+
+        K = pwhObj.gains[n] .* freqz(pwhObj.kernels[n], fKernels, Fs)
+
+        plot!(
+            plt,
+            fKernels[2:end],
+            lin2dB.(K[2:end]),
+            xscale = :log10,
+            label = "$n",
+            subplot = 2
+            )
+
+        plot!(
+            plt,
+            fKernels[2:end],
+            unwrap(angle.(K[2:end])),
+            xscale = :log10,
+            label = "$n",
+            subplot = 4
+            )
+
+    end
+
+    return plt
 
 end
