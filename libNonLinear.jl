@@ -1,6 +1,7 @@
 using FFTW
 using DSP
 using Plots
+using CSV
 
 function lin2dB(value::Number, reference::Number = 1.0)
     return 20.0 * log10(abs(value / reference))
@@ -467,5 +468,14 @@ function pwh2plot(pwhObj::pwh, wLength::Integer, Fs::Real)
     end
 
     return plt
+
+end
+
+function readMatrixCsv(rePath::String, imPath::String)
+
+    Mre = convert(Array{Complex{Float64}, 2}, CSV.read("$rePath", header = 0))
+    Mim = im * convert(Array{Float64, 2}, CSV.read("$imPath", header = 0))
+
+    return  Mre + Mim
 
 end
