@@ -580,8 +580,8 @@ function windowHighers(
     N::Integer,
     γ::Real,
     Fs::Real,
-    innerWin,
-    outerWin
+    innerWin::Function,
+    outerWin::Function
     )
 
     c = div(length(h), 2)
@@ -636,10 +636,107 @@ function hammSolve(
     γ::Real,
     A::Real,
     Fs::Real,
-    innerWin,
-    outerWin
+    innerWin::Function,
+    outerWin::Function
     )
 
     return cMatrix(N, A) \ windowHighers(h, M, N, γ, Fs, innerWin, outerWin)
+
+end
+
+function coreMatrix(N::Integer, K::Integer)
+    return 2.0 * (0:(N - 1)) * transpose(0:(K - 1)) / K
+end
+
+function firFreqz(
+    b::AbstractVector{<:Real},
+    K::Integer
+    )
+
+    return transpose(exp.(-im * π * coreMatrix(length(b), K))) * b
+
+end
+
+function costFunction(
+    b::AbstractVector{<:Real},
+    Hₜ::AbstractVector{<:Complex},
+    C::AbstractMatrix{<:Real},
+    S::AbstractMatrix{<:Real}
+    )
+
+    H = firFreqz(b, length(Hₜ))
+
+    J   = sum(abs2, firFreqz(b, length(Hₜ)) - Hₜ)
+    ∇J  = 2.0 * sum(
+        C .* transpose(real(H - Hₜ)) - S .* transpose(imag(H - Hₜ)),
+        dims=2
+        )[:, 1]
+
+    return J, ∇J
+
+end
+
+function firGradientDescent(
+    Hₜ::AbstractVector{<:Complex},
+    N::Integer,
+    α::Function,
+    I::Integer
+    )
+
+    b = zeros(N)
+    b[1] = 1.0
+    
+    J = zeros(I)
+
+    M = coreMatrix(N, length(Hₜ))
+
+    C = cospi.(M)
+    S = sinpi.(M)
+
+    for i in 1:I
+
+        J[i], ∇J = costFunction(b, Hₜ, C, S)
+
+        b = b - α(i) * ∇J
+
+    end
+
+    return b, J
+
+end
+
+function test_firGradientDescent()
+
+    responsetype    = Lowpass(0.2)
+    designmethod    = FIRWindow(hanning(64))
+    testFilt        = digitalfilter(responsetype, designmethod)
+    K               = 1024
+    N               = length(testFilt)
+    α(i)            = 1e-6
+    I               = 3000
+
+    Hₜ = firFreqz(testFilt, K)
+
+    b, J = firGradientDescent(Hₜ, N, α, I)
+
+    return b, J, testFilt
+
+end
+
+function test_firGradientDescent_2()
+
+    responsetype    = Lowpass(0.2)
+    designmethod    = Elliptic(4, 0.5, 30)
+    testFilt        = digitalfilter(responsetype, designmethod)
+    K               = 1024
+    N               = 128
+    α(i)            = 1e-6
+    I               = 3000
+
+    Hₜ = freqz(testFilt, 2π * (0:(K - 1)) / K)
+
+    b, J = firGradientDescent(Hₜ, N, α, I)
+
+    return b, J, testFilt
 
 end
