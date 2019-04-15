@@ -588,9 +588,11 @@ function windowHighers(
 
     H = zeros(Complex{Float64}, N, M)
 
+    w = zeros(M)
+
     for n in 1:N
 
-        w               = zeros(M)
+        fill!(w, zero(eltype(w)))
 
         fCenter         = c - higherGap(γ, n, Fs)
         fGap2Next       = gap2next(γ, n, Fs)
@@ -640,7 +642,14 @@ function hammSolve(
     outerWin::Function
     )
 
-    return cMatrix(N, A) \ windowHighers(h, M, N, γ, Fs, innerWin, outerWin)
+    G = cMatrix(N, A) \ windowHighers(h, M, N, γ, Fs, innerWin, outerWin)
+
+    # Force Hermitian Symmetry
+    M = size(G, 2)
+    nyq = div(M, 2) + 1
+    G[:, mod.(M .+ 1 .- (1:nyq), M) .+ 1] = conj.(G[:, 1:nyq])
+
+    return G
 
 end
 
@@ -685,7 +694,7 @@ function firGradientDescent(
 
     b = zeros(N)
     b[1] = 1.0
-    
+
     J = zeros(I)
 
     M = coreMatrix(N, length(Hₜ))
