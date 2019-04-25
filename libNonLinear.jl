@@ -689,7 +689,8 @@ function firGradientDescent(
     Hₜ::AbstractVector{<:Complex},
     N::Integer,
     α::Function,
-    I::Integer
+    I::Integer,
+    ϵ::Real
     )
 
     b = zeros(N)
@@ -707,6 +708,10 @@ function firGradientDescent(
         J[i], ∇J = costFunction(b, Hₜ, C, S)
 
         b = b - α(i) * ∇J
+
+        if (i > 1) && (abs(J[i - 1] - J[i]) < ϵ)
+            break
+        end
 
     end
 
@@ -747,5 +752,45 @@ function test_firGradientDescent_2()
     b, J = firGradientDescent(Hₜ, N, α, I)
 
     return b, J, testFilt
+
+end
+
+function hamm2Firs(
+    G::AbstractMatrix{<:Complex},
+    B::Integer,
+    α::Function,
+    I::Integer,
+    ϵ::Real
+    )
+
+    bMat = zeros(B, size(G, 1))
+    jMat = zeros(I, size(G, 1))
+
+    for n in 1:size(G, 1)
+        bMat[:, n], jMat[:, n] = firGradientDescent(G[n, :], B, α, I, ϵ)
+    end
+
+    return bMat, jMat
+
+end
+
+function hammIdentify(
+    h::AbstractArray,
+    M::Integer,
+    N::Integer,
+    γ::Real,
+    A::Real,
+    Fs::Real,
+    innerWin::Function,
+    outerWin::Function,
+    B::Integer,
+    α::Function,
+    I::Integer,
+    ϵ::Real
+    )
+
+    G = hammSolve(h, M, N, γ, A, Fs, innerWin, outerWin)
+
+    return hamm2Firs(G, B, α, I, ϵ)
 
 end
