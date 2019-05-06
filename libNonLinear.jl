@@ -335,7 +335,7 @@ function pwh2faust(pwhObj::pwh, dspPath::String, biqFcn::String)
 
     open(dspPath, "w") do fID
 
-        write(fID, """fi = library("filters.lib");\nde = library("delays.lib");\n\n""")
+        write(fID, """fi = library("filters.lib");\n\n""")
 
         for n in 1:pwhObj.N
 
@@ -478,6 +478,10 @@ function pwh2matrix(pwhObj::pwh, wLength::Integer, Fs::Real)
 
 end
 
+function readMatrixCsv(path::String)
+    return convert(Array{Float64, 2}, CSV.read("$path", header = 0))
+end
+
 function readMatrixCsv(rePath::String, imPath::String)
 
     Mre = convert(Array{Complex{Float64}, 2}, CSV.read("$rePath", header = 0))
@@ -590,6 +594,8 @@ function windowHighers(
 
     w = zeros(M)
 
+    # plt = plot()
+
     for n in 1:N
 
         fill!(w, zero(eltype(w)))
@@ -621,6 +627,9 @@ function windowHighers(
 
         w[nWhead:(nWhead + nMaxData - 1)] = h[nHead:(nHead + nMaxData - 1)] .*
             innerWin(nMaxData)
+
+        # plt  = plot!(plt, w)
+        # display(plt)
 
         H[n, :] = fft(w .* outerWin(M))
         H[n, :] .*= fcircshiftExp(H[n, :], totalShift)
@@ -792,5 +801,66 @@ function hammIdentify(
     G = hammSolve(h, M, N, γ, A, Fs, innerWin, outerWin)
 
     return hamm2Firs(G, B, α, I, ϵ)
+
+end
+
+function firs2faust(
+    aTaps::Integer,
+    ripple::Real,
+    B::AbstractMatrix{<:Real},
+    dspPath::String
+    )
+
+    open(dspPath, "w") do fID
+
+        write(fID, """fi = library("filters.lib");\n\n""")
+
+        for n in 1:size(B, 2)
+
+            aFir = branchAntialFirTaps(n, aTaps, ripple)
+
+            write(fID, "br$n = fi.fir((")
+
+            for t in 1:length(aFir)
+
+                write(fID, "$(aFir[t])")
+
+                if t == length(aFir)
+                    write(fID, ")) : pow(_, $(n)) : fi.fir((")
+                else
+                    write(fID, ", ")
+                end
+
+            end
+
+            for m in 1:size(B, 1)
+
+                write(fID, "$(B[m, n])")
+
+                if m == size(B, 1)
+                    write(fID, "));\n\n")
+                else
+                    write(fID, ", ")
+                end
+
+            end
+
+        end
+
+        write(fID, "\nprocess = _ <: ")
+
+        for n in 1:size(B, 2)
+
+            write(fID, "br$(n)")
+
+            if n == size(B, 2)
+                write(fID, " :> _;\n")
+            else
+                write(fID, ", ")
+            end
+
+        end
+
+    end
 
 end
