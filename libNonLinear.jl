@@ -511,7 +511,7 @@ function matrix2plot(M::AbstractArray, Fs::Real)
     plot!(
         plt,
         f[2:end],
-        unwrap(transpose(angle.(M[:, 2:nyq])), dims = 1),
+        transpose(angle.(M[:, 2:nyq])), # unwrap(transpose(angle.(M[:, 2:nyq])), dims = 1),
         ylabel = "Angle [rad]",
         xscale = :log10,
         subplot = 2
@@ -640,6 +640,10 @@ function windowHighers(
 
 end
 
+function blockDC!(G::AbstractMatrix{<:Complex})
+    G[:, 1] .= zero(eltype(G))
+end
+
 function hammSolve(
     h::AbstractArray,
     M::Integer,
@@ -652,6 +656,7 @@ function hammSolve(
     )
 
     G = cMatrix(N, A) \ windowHighers(h, M, N, γ, Fs, innerWin, outerWin)
+    blockDC!(G)
 
     # Force Hermitian Symmetry
     M = size(G, 2)
@@ -813,7 +818,9 @@ function firs2faust(
 
     open(dspPath, "w") do fID
 
-        write(fID, """fi = library("filters.lib");\n\n""")
+        write(fID, """fi = library("filters.lib");\nba = library("basics.lib");\n\n""")
+
+        write(fID, """gainAdjust = alpha\nwith{\n    alpha= hslider("Gain Adjust [unit:dB][style:knob]",0, -120, 120, 0.1) : ba.db2linear;\n};\n\n""")
 
         for n in 1:size(B, 2)
 
@@ -826,7 +833,7 @@ function firs2faust(
                 write(fID, "$(aFir[t])")
 
                 if t == length(aFir)
-                    write(fID, ")) : pow(_, $(n)) : fi.fir((")
+                    write(fID, ")) : pow(_, $(n)) : *(_, pow(gainAdjust, $(1 - n))) : fi.fir((")
                 else
                     write(fID, ", ")
                 end
@@ -847,7 +854,7 @@ function firs2faust(
 
         end
 
-        write(fID, "\nprocess = _ <: ")
+        write(fID, "\nprocess = _, 0.99 : min <: ")
 
         for n in 1:size(B, 2)
 
@@ -862,5 +869,27 @@ function firs2faust(
         end
 
     end
+
+end
+
+function applyModel(
+    aTaps::Integer,
+    ripple::Real,
+    B::AbstractMatrix{<:Real},
+    x::AbstractArray{<:Real},
+    A::Real = 1.0
+    )
+
+    y = zeros(eltype(x), size(x))
+
+    for n in 1:size(B, 2)
+
+        aFir = branchAntialFirTaps(n, aTaps, ripple)
+
+        y += filt(B[:, n], A^(1 - n) .* filt(aFir, x).^n)
+
+    end
+
+    return y
 
 end
