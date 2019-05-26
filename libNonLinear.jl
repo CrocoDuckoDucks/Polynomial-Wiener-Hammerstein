@@ -2,6 +2,7 @@ using FFTW
 using DSP
 using Plots
 using CSV
+using Interpolations
 
 function lin2dB(value::Number, reference::Number = 1.0)
     return 20.0 * log10(abs(value / reference))
@@ -491,6 +492,10 @@ function readMatrixCsv(rePath::String, imPath::String)
 
 end
 
+function readConvolutionResult(path::String)
+    return readMatrixCsv(path)[:]
+end
+
 function matrix2plot(M::AbstractArray, Fs::Real)
 
     nyq = div(size(M, 2), 2) + 1
@@ -812,7 +817,7 @@ end
 function firs2faust(
     aTaps::Integer,
     ripple::Real,
-    B::AbstractMatrix{<:Real},
+    bMat::AbstractMatrix{<:Real},
     dspPath::String
     )
 
@@ -822,7 +827,7 @@ function firs2faust(
 
         write(fID, """gainAdjust = alpha\nwith{\n    alpha= hslider("Gain Adjust [unit:dB][style:knob]",0, -120, 120, 0.1) : ba.db2linear;\n};\n\n""")
 
-        for n in 1:size(B, 2)
+        for n in 1:size(bMat, 2)
 
             aFir = branchAntialFirTaps(n, aTaps, ripple)
 
@@ -840,11 +845,11 @@ function firs2faust(
 
             end
 
-            for m in 1:size(B, 1)
+            for m in 1:size(bMat, 1)
 
-                write(fID, "$(B[m, n])")
+                write(fID, "$(bMat[m, n])")
 
-                if m == size(B, 1)
+                if m == size(bMat, 1)
                     write(fID, "));\n\n")
                 else
                     write(fID, ", ")
@@ -856,11 +861,11 @@ function firs2faust(
 
         write(fID, "\nprocess = _, 0.99 : min <: ")
 
-        for n in 1:size(B, 2)
+        for n in 1:size(bMat, 2)
 
             write(fID, "br$(n)")
 
-            if n == size(B, 2)
+            if n == size(bMat, 2)
                 write(fID, " :> _;\n")
             else
                 write(fID, ", ")
@@ -872,24 +877,116 @@ function firs2faust(
 
 end
 
+function firsInterpolation(
+    interpRange::AbstractVector,
+    bMats::Array{<:Real, 3},
+    interpQuery::AbstractVector,
+    interpArgs...
+    )
+
+    interp = interpolate((interpRange, ), bMats[1, 1, :], interpArgs...)
+    interpolators = Matrix{typeof(interp)}(undef, size(bMats, 1), size(bMats, 2))
+
+    interpMats = zeros(
+        eltype(bMats),
+        size(bMats, 1),
+        size(bMats, 2),
+        length(interpQuery)
+        )
+
+    for n in 1:size(bMats, 2)
+        for t in 1:size(bMats, 1)
+
+            if (t == 1) && (n == 1)
+                interpolators[t, n] = interp
+            else
+                interpolators[t, n] = interpolate(
+                    (interpRange, ),
+                    bMats[t, n, :],
+                    interpArgs...
+                    )
+            end
+
+            interpMats[t, n, :] = interpolators[t, n](interpQuery)
+
+        end
+    end
+
+    return interpMats, interpolators
+
+end
+
 function applyModel(
     aTaps::Integer,
     ripple::Real,
-    B::AbstractMatrix{<:Real},
+    bMat::AbstractMatrix{<:Real},
     x::AbstractArray{<:Real},
     A::Real = 1.0
     )
 
     y = zeros(eltype(x), size(x))
 
-    for n in 1:size(B, 2)
+    for n in 1:size(bMat, 2)
 
         aFir = branchAntialFirTaps(n, aTaps, ripple)
 
-        y += filt(B[:, n], A^(1 - n) .* filt(aFir, x).^n)
+        y += filt(bMat[:, n], A^(1 - n) .* filt(aFir, x).^n)
 
     end
 
     return y
+
+end
+
+function guessShift(h::AbstractVector{<:Real})
+
+    return div(length(h), 2) + 1 - argmax(abs.(h))
+
+end
+
+function hammIdentifyFromFile(
+    path::String,
+    shift::Integer,
+    M::Integer,
+    N::Integer,
+    γ::Real,
+    A::Real,
+    Fs::Real,
+    innerWin::Function,
+    outerWin::Function,
+    B::Integer,
+    α::Function,
+    I::Integer,
+    ϵ::Real
+    )
+
+    h = readConvolutionResult(path)
+
+    G = hammSolve(circshift(h, shift), M, N, γ, A, Fs, innerWin, outerWin)
+
+    bMat, jMat = hamm2Firs(G, B, α, I, ϵ)
+
+    return bMat, jMat, G
+
+end
+
+function hammEasyIdentify(
+    path::String,
+    shift::Integer,
+    γ::Real,
+    A::Real,
+    Fs::Real,
+    B::Integer,
+    I::Integer,
+    ϵ::Real
+    )
+
+    M = 2048
+    N = 10
+    innerWin(N) = novakWin(N, 16, 16)
+    outerWin(N) = hanning(N)
+    α(i) = 1e-5
+
+    return hammIdentifyFromFile(path, shift, M, N, γ, A, Fs, innerWin, outerWin, B, α, I, ϵ)
 
 end
