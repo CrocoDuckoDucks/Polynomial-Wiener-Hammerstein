@@ -991,3 +991,75 @@ function hammEasyIdentify(
 
 end
 
+function writeDynamicInterpolationTestDSP(path::String)
+
+    K = 1024
+    N = 64
+
+    w = (2π / K) * (0:(K - 1))
+
+    t1 = Bandpass(0.1, 0.2)
+    t2 = Bandpass(0.8, 0.9)
+
+    m1 = Elliptic(1, 2, 3)
+    m2 = Elliptic(1, 2, 3)
+
+    b1 = digitalfilter(t1, m1)
+    b2 = digitalfilter(t2, m2)
+
+    H1 = freqz(b1, w)
+    H2 = 2.0 * freqz(b2, w)
+
+    α(i) = 1e-5
+
+    F = zeros(N, 1, 2)
+    F[:, :, 1], _ = firGradientDescent(H1, N, α, 10000, 1e-6)
+    F[:, :, 2], _ = firGradientDescent(H2, N, α, 10000, 1e-6)
+
+    v = 1.0:2.0
+    q = 1.0:0.1:2.0
+    s = range(0.0, stop=1.0, length=length(q))
+
+    Fi, _ = firsInterpolation(v, F, q, Gridded(Linear()))
+
+    open(path, "w") do fID
+
+        write(fID, """fi = library("filters.lib");\nba = library("basics.lib");\nan = library("analyzers.lib");\n\n""")
+
+        for f in 1:size(Fi, 3)
+
+            write(fID, "f$f = fi.fir((")
+
+            for t in 1:size(Fi, 1)
+
+                write(fID, "$(Fi[t, 1, f])")
+
+                if t == size(Fi, 1)
+                    write(fID, "));\n\n")
+                else
+                    write(fID, ", ")
+                end
+
+            end
+
+        end
+
+        write(fID, "selector(x, s) = x <: ")
+
+        for a in 1:length(s)
+
+            if a == length(s)
+                write(fID, "*(f$a, (s >= $(s[a]))) :> _;\n\n")
+            else
+                write(fID, "*(f$a, (s >= $(s[a])) & (s < $(s[a + 1]))), ")
+            end
+
+        end
+
+        write(fID, """env = an.amp_follower(rel)\nwith{\n    rel = hslider("[1]Release [unit:ms][style:knob]", 5, 1, 1000, 0.1) * 0.001;\n};\n\n""")
+
+        write(fID, "process = _ <: _, env : selector;")
+
+    end
+
+end
