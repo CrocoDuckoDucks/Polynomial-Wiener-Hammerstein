@@ -1024,7 +1024,7 @@ function writeDynamicInterpolationTestDSP(path::String)
 
     open(path, "w") do fID
 
-        write(fID, """fi = library("filters.lib");\nba = library("basics.lib");\nan = library("analyzers.lib");\n\n""")
+        write(fID, """fi = library("filters.lib");\nan = library("analyzers.lib");\n\n""")
 
         for f in 1:size(Fi, 3)
 
@@ -1059,6 +1059,90 @@ function writeDynamicInterpolationTestDSP(path::String)
         write(fID, """env = an.amp_follower(rel)\nwith{\n    rel = hslider("[1]Release [unit:ms][style:knob]", 5, 1, 1000, 0.1) * 0.001;\n};\n\n""")
 
         write(fID, "process = _ <: _, env : selector;")
+
+    end
+
+end
+
+function interpMats2Faust(
+    aTaps::Integer,
+    ripple::Real,
+    interpMats::Array{<:Real, 3},
+    interpRange::AbstractVector,
+    dspPath::String
+    )
+
+    @assert isequal(size(interpMats, 3), length(interpRange))
+
+    open(dspPath, "w") do fID
+
+        write(fID, """fi = library("filters.lib");\nan = library("analyzers.lib");\n\n""")
+
+        for o in 1:size(interpMats, 2)
+
+            for p in 1:size(interpMats, 3)
+
+                write(fID, "f_$(o)_$(p) = fi.fir((")
+
+                for t in 1:size(interpMats, 1)
+
+                    write(fID, "$(interpMats[t, o, p])")
+
+                    if t == size(interpMats, 1)
+                        write(fID, "));\n\n")
+                    else
+                        write(fID, ", ")
+                    end
+
+                end
+
+            end
+
+            aFir = branchAntialFirTaps(o, aTaps, ripple)
+
+            write(fID, "br$o(x, s) = fi.fir((")
+
+            for t in 1:length(aFir)
+
+                write(fID, "$(aFir[t])")
+
+                if t == length(aFir)
+                    write(fID, ")) : pow(_, $(o)) <: ")
+                else
+                    write(fID, ", ")
+                end
+
+            end
+
+            for a in 1:length(interpRange)
+
+                if a == length(interpRange)
+                    write(fID, "*(f_$(o)_$(a), (s >= $(interpRange[a]))) :> _;\n\n")
+                else
+                    write(fID, "*(f_$(o)_$(a), (s >= $(interpRange[a])) & (s < $(interpRange[a + 1]))), ")
+                end
+
+            end
+
+        end
+
+        write(fID, "model(x, s) = x <: ")
+
+        for o in 1:size(interpMats, 2)
+
+            write(fID, "br$o(_, s)")
+
+            if o == size(interpMats, 2)
+                write(fID, " :> _;\n\n")
+            else
+                write(fID, ", ")
+            end
+
+        end
+
+        write(fID, """env = an.amp_follower(rel)\nwith{\n    rel = hslider("[1]Release [unit:ms][style:knob]", 5, 1, 1000, 0.1) * 0.001;\n};\n\n""")
+
+        write(fID, "process = _ <: _, env : model;")
 
     end
 
