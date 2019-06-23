@@ -747,10 +747,11 @@ function test_firGradientDescent()
     N               = length(testFilt)
     α(i)            = 1e-6
     I               = 3000
+    ϵ               = 1e-4
 
     Hₜ = firFreqz(testFilt, K)
 
-    b, J = firGradientDescent(Hₜ, N, α, I)
+    b, J = firGradientDescent(Hₜ, N, α, I, ϵ)
 
     return b, J, testFilt
 
@@ -810,7 +811,9 @@ function hammIdentify(
 
     G = hammSolve(h, M, N, γ, A, Fs, innerWin, outerWin)
 
-    return hamm2Firs(G, B, α, I, ϵ)
+    bMat, jMat = hamm2Firs(G, B, α, I, ϵ)
+
+    return bMat, jMat, G
 
 end
 
@@ -1068,7 +1071,7 @@ function interpMats2Faust(
     aTaps::Integer,
     ripple::Real,
     interpMats::Array{<:Real, 3},
-    interpRange::AbstractVector,
+    interpRange::AbstractVector{<:Real},
     dspPath::String
     )
 
